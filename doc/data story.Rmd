@@ -10,7 +10,16 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Step 0: check and install needed packages. Load the libraries and functions. 
+Inaugural speeches are the beginning of presidency for every American presidents, which are supposed to cover the heat of time and show the presidents' political position. When there is a recession, would presidents tend to use sepecific words? Would they focus more on economy? Would they feel fear? This report focus on above questions.
+
+According to the list of recessions in the United States (https://en.wikipedia.org/wiki/List_of_recessions_in_the_United_States), I pick 14 presidents who gave their inaugural speeches during recessions. They are Barack Obama, Ronald Reagan, John.F.Kennedy, Harry.S.Truman, William McKinley, Andrew Jackson, Abraham Lincoln, James.K.Polk, Grover Cleveland, William Henry Harrison, John Quincy Adams, James Monroe, Thomas Jefferson, John Adams. In the following report, I use "the first group" to represent these 14 presidents, and "the other group" to represent other presidents.
+
+I will use worldcloud to find presidents' most used words, topic models to find their topics, and sentiment analysis to analyze their emotions.
+
+
+
+# Step 0: Gather data
+**Check and install needed packages**. Load the libraries and functions. 
 
 ```{r, message=FALSE, warning=FALSE}
 packages.used=c("rvest", "tibble", "qdap", 
@@ -47,18 +56,24 @@ library("RColorBrewer")
 library("RANN")
 library("tm")
 library("topicmodels")
+library("wordcloud")
+library(tidytext)
 
 source("../lib/plotstacked.R")
 source("../lib/speechFuncs.R")
 ```
+
 This notebook was prepared with the following environmental settings.
 
 ```{r}
 print(R.version)
 ```
-# Step 1: Data harvest: scrap speech URLs from <http://www.presidency.ucsb.edu/>.
+
+**Data harvest**: scrap speech URLs from <http://www.presidency.ucsb.edu/>.
 
 Following the example of [Jerid Francom](https://francojc.github.io/2015/03/01/web-scraping-with-rvest-in-r/), we used [Selectorgadget](http://selectorgadget.com/) to choose the links we would like to scrap. For this project, we selected all inaugural addresses of past presidents, nomination speeches of major party candidates and farewell addresses. We also included several public speeches from Donald Trump for our textual analysis of presidential speeches. 
+
+The inaugural speeches dates are as follows.
 
 ```{r, message=FALSE, warning=FALSE}
 ### Inauguaral speeches
@@ -83,16 +98,19 @@ main.page=read_html("http://www.presidency.ucsb.edu/farewell_addresses.php")
 farewell <- f.speechlinks(main.page)
 #head(farewell)
 ```
-# Step 2: Using speech metadata posted on <http://www.presidency.ucsb.edu/>, we prepared CSV data sets for the speeches we will scrap. 
+
+
+Using speech metadata posted on <http://www.presidency.ucsb.edu/>, we prepared CSV data sets for the speeches we will scrap. 
 
 ```{r}
 inaug.list=read.csv("../data/inauglist.csv", stringsAsFactors = FALSE)
 nomin.list=read.csv("../data/nominlist.csv", stringsAsFactors = FALSE)
 farewell.list=read.csv("../data/farewelllist.csv", stringsAsFactors = FALSE)
 ```
+
 We assemble all scrapped speeches into one list. Note here that we don't have the full text yet, only the links to full text transcripts. 
 
-# Step 3: scrap the texts of speeches from the speech URLs.
+**Scrap the texts of speeches from the speech URLs.**
 
 ```{r}
 speech.list=rbind(inaug.list, nomin.list, farewell.list)
@@ -102,6 +120,7 @@ speech.list$type=c(rep("inaug", nrow(inaug.list)),
 speech.url=rbind(inaug, nomin, farewell)
 speech.list=cbind(speech.list, speech.url)
 ```
+
 Based on the list of speeches, we scrap the main text part of the transcript's html page. For simple html pages of this kind,  [Selectorgadget](http://selectorgadget.com/) is very convenient for identifying the html node that `rvest` can use to scrap its content. For reproducibility, we also save our scrapped speeches into our local folder as individual speech files. 
 
 ```{r}
@@ -121,5 +140,401 @@ for(i in seq(nrow(speech.list))) {
   cat(text)  # write the file
   sink() # close the file
 }
+
+speech.list[which(speech.list$File=="GroverCleveland-II"),]$File <- "GroverCleveland"
+speech.list[which(speech.list$File=="GroverCleveland-I"),]$File <- "GroverCleveland"
 ```
 
+```{r}
+speech1=paste(readLines("../data/fulltext/SpeechDonaldTrump-NA.txt", 
+                  n=-1, skipNul=TRUE),
+              collapse=" ")
+speech2=paste(readLines("../data/fulltext/SpeechDonaldTrump-NA2.txt", 
+                  n=-1, skipNul=TRUE),
+              collapse=" ")
+speech3=paste(readLines("../data/fulltext/PressDonaldTrump-NA.txt", 
+                  n=-1, skipNul=TRUE),
+              collapse=" ")
+
+Trump.speeches=data.frame(
+  President=rep("Donald J. Trump", 3),
+  File=rep("DonaldJTrump", 3),
+  Term=rep(0, 3),
+  Party=rep("Republican", 3),
+  Date=c("August 31, 2016", "September 7, 2016", "January 11, 2017"),
+  Words=c(word_count(speech1), word_count(speech2), word_count(speech3)),
+  Win=rep("yes", 3),
+  type=rep("speeches", 3),
+  links=rep(NA, 3),
+  urls=rep(NA, 3),
+  fulltext=c(speech1, speech2, speech3)
+)
+
+speech.list=rbind(speech.list, Trump.speeches)
+```
+
+For simpler visualization, we divide presidents into two parts: a subset of the presidents gave inaugural speeches during recessions and others. We put "*" behind the presidents' name in the first group for simpler visualization.
+
+```{r}
+sel.comparison=c("BarackObama","RonaldReagan","JohnFKennedy","HarrySTruman",
+                 "WilliamMcKinley","AndrewJackson","AbrahamLincoln","JamesKPolk",
+                 "GroverCleveland","WilliamHenryHarrison","JohnQuincyAdams","JamesMonroe",
+                 "ThomasJefferson","JohnAdams")
+sel.other <- setdiff(unique(sentence.list$File),sel.comparison)
+
+for(i in 1:length(sel.comparison)){
+  for(j in 1:length(speech.list$File)){
+    if(speech.list$File[j] == sel.comparison[i]){
+      speech.list$File[j] <- paste(sel.comparison[i],"*")
+    }
+  }
+}
+sel.comparison <- paste(sel.comparison, "*")
+```
+
+**Data Processing --- generate list of sentences**
+
+We will use sentences as units of analysis for this project, as sentences are natural languge units for organizing thoughts and ideas. 
+
+We assign an sequential id to each sentence in a speech (`sent.id`) and also calculated the number of words in each sentence as *sentence length* (`word.count`).
+
+```{r, message=FALSE, warning=FALSE}
+sentence.list=NULL
+for(i in 1:nrow(speech.list)){
+  sentences=sent_detect(speech.list$fulltext[i],
+                        endmarks = c("?", ".", "!", "|",";"))
+  if(length(sentences)>0){
+    emotions=get_nrc_sentiment(sentences)
+    word.count=word_count(sentences)
+    # colnames(emotions)=paste0("emo.", colnames(emotions))
+    # in case the word counts are zeros?
+    emotions=diag(1/(word.count+0.01))%*%as.matrix(emotions)
+    sentence.list=rbind(sentence.list, 
+                        cbind(speech.list[i,-ncol(speech.list)],
+                              sentences=as.character(sentences), 
+                              word.count,
+                              emotions,
+                              sent.id=1:length(sentences)
+                              )
+    )
+  }
+}
+```
+
+Some non-sentences exist in raw data due to erroneous extra end-of-sentence marks. Remove them.
+```{r,echo = FALSE}
+sentence.list=
+  sentence.list%>%
+  filter(!is.na(word.count)) 
+```
+
+# Step 1: WordCloud
+
+**Read in the speeches.**
+```{r,echo = FALSE}
+folder.path1="../data/Inaug_recession/"
+folder.path2="../data/Inaug_not_recession/"
+speeches1=list.files(path = folder.path1, pattern = "*.txt")
+speeches2=list.files(path = folder.path2, pattern = "*.txt")
+prex.out1=substr(speeches1, 6, nchar(speeches1)-4)
+prex.out2=substr(speeches2, 6, nchar(speeches2)-4)
+
+ff.all1<-Corpus(DirSource(folder.path1))
+ff.all2<-Corpus(DirSource(folder.path2))
+```
+
+**Text processing**
+
+```{r,echo = FALSE}
+ff.all1<-tm_map(ff.all1, stripWhitespace)
+ff.all2<-tm_map(ff.all2, stripWhitespace)
+ff.all1<-tm_map(ff.all1, content_transformer(tolower))
+ff.all2<-tm_map(ff.all2, content_transformer(tolower))
+ff.all1<-tm_map(ff.all1, removeWords, stopwords("english"))
+ff.all2<-tm_map(ff.all2, removeWords, stopwords("english"))
+ff.all1<-tm_map(ff.all1, removeWords, character(0))
+ff.all2<-tm_map(ff.all2, removeWords, character(0))
+ff.all1<-tm_map(ff.all1, removePunctuation)
+ff.all2<-tm_map(ff.all2, removePunctuation)
+
+tdm.all1<-TermDocumentMatrix(ff.all1)
+tdm.all2<-TermDocumentMatrix(ff.all2)
+
+tdm.tidy1=tidy(tdm.all1)
+tdm.tidy2=tidy(tdm.all2)
+
+tdm.overall1=summarise(group_by(tdm.tidy1, term), sum(count))
+tdm.overall2=summarise(group_by(tdm.tidy2, term), sum(count))
+```
+
+**Inspect an overall wordcloud**
+
+```{r, fig.height=3, fig.width=3,echo = FALSE}
+wordcloud(tdm.overall1$term, tdm.overall1$`sum(count)`,
+          scale=c(5,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Blues"))
+```
+
+
+```{r, fig.height=3, fig.width=3,echo = FALSE}
+wordcloud(tdm.overall2$term, tdm.overall2$`sum(count)`,
+          scale=c(5,0.5),
+          max.words=100,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.3,
+          use.r.layout=T,
+          random.color=FALSE,
+          colors=brewer.pal(9,"Greens"))
+```
+
+These are the wordcloud of presidents' inaugural speeches of the first group in blue and of the other group in green.The words related to economy, like "revenue", "interests", "support", show up in the first one.
+So, we can conclude that when there was a recession, presidents did say more words related to economy than the others.
+
+
+# Step 2: Data analysis --- Topic modeling
+
+For topic modeling, we prepare a corpus of sentence snipets as follows. For each speech, we start with sentences and prepare a snipet with a given sentence with the flanking sentences. 
+
+```{r}
+corpus.list=sentence.list[2:(nrow(sentence.list)-1), ]
+sentence.pre=sentence.list$sentences[1:(nrow(sentence.list)-2)]
+sentence.post=sentence.list$sentences[3:(nrow(sentence.list)-1)]
+corpus.list$snipets=paste(sentence.pre, corpus.list$sentences, sentence.post, sep=" ")
+rm.rows=(1:nrow(corpus.list))[corpus.list$sent.id==1]
+rm.rows=c(rm.rows, rm.rows-1)
+corpus.list=corpus.list[-rm.rows, ]
+```
+
+** Text mining**
+```{r}
+docs <- Corpus(VectorSource(corpus.list$snipets))
+```
+
+**Text basic processing**
+Adapted from <https://eight2late.wordpress.com/2015/09/29/a-gentle-introduction-to-topic-modeling-using-r/>.
+
+```{r}
+#remove potentially problematic symbols
+docs <-tm_map(docs,content_transformer(tolower))
+
+#remove punctuation
+docs <- tm_map(docs, removePunctuation)
+
+#Strip digits
+docs <- tm_map(docs, removeNumbers)
+
+#remove stopwords
+docs <- tm_map(docs, removeWords, stopwords("english"))
+
+#remove whitespace
+docs <- tm_map(docs, stripWhitespace)
+
+#Stem document
+docs <- tm_map(docs,stemDocument)
+```
+
+**Topic modeling**
+
+Gengerate document-term matrices. 
+
+```{r}
+dtm <- DocumentTermMatrix(docs)
+#convert rownames to filenames#convert rownames to filenames
+rownames(dtm) <- paste(corpus.list$type, corpus.list$File,
+                       corpus.list$Term, corpus.list$sent.id, sep="_")
+
+rowTotals <- apply(dtm , 1, sum) #Find the sum of words in each Document
+
+dtm  <- dtm[rowTotals> 0, ]
+corpus.list=corpus.list[rowTotals>0, ]
+```
+
+**Run LDA**
+
+```{r}
+#Set parameters for Gibbs sampling
+burnin <- 4000
+iter <- 2000
+thin <- 500
+seed <-list(2003,5,63,100001,765)
+nstart <- 5
+best <- TRUE
+
+#Number of topics
+k <- 15
+
+#Run LDA using Gibbs sampling
+ldaOut <-LDA(dtm, k, method="Gibbs", control=list(nstart=nstart, 
+                                                 seed = seed, best=best,
+                                                 burnin = burnin, iter = iter, 
+                                                 thin=thin))
+#write out results
+#docs to topics
+ldaOut.topics <- as.matrix(topics(ldaOut))
+table(c(1:k, ldaOut.topics))
+write.csv(ldaOut.topics,file=paste("../output/LDAGibbs",k,"DocsToTopics.csv"))
+
+#top 6 terms in each topic
+ldaOut.terms <- as.matrix(terms(ldaOut,20))
+write.csv(ldaOut.terms,file=paste("../output/LDAGibbs",k,"TopicsToTerms.csv"))
+
+#probabilities associated with each topic assignment
+topicProbabilities <- as.data.frame(ldaOut@gamma)
+write.csv(topicProbabilities,file=paste("../output/LDAGibbs",k,"TopicProbabilities.csv"))
+```
+
+```{r}
+terms.beta=ldaOut@beta
+terms.beta=scale(terms.beta)
+topics.terms=NULL
+for(i in 1:k){
+  topics.terms=rbind(topics.terms, ldaOut@terms[order(terms.beta[i,], decreasing = TRUE)[1:7]])
+}
+```
+
+Based on the most popular terms and the most salient terms for each topic, we assign a hashtag to each topic. This part require manual setup as the topics are likely to change. 
+
+```{r}
+topics.hash=c("Economy", "America", "Defense", "Belief", "Election", "Patriotism", "Unity", "Government", "Reform", "Temporal", "WorkingFamilies", "Freedom", "Equality", "Misc", "Legislation")
+corpus.list$ldatopic=as.vector(ldaOut.topics)
+corpus.list$ldahash=topics.hash[ldaOut.topics]
+
+colnames(topicProbabilities)=topics.hash
+corpus.list.df=cbind(corpus.list, topicProbabilities)
+```
+
+**Matrix of topics**
+Choosing the following topics to generate the matrix of topics to see if presidents in the first group cared more about economy than the ones in the other group: "Economy", "Equality", "Defense", "Legislation", "Government", "Reform", "Freedom" and "WorkingFamilies"
+
+```{r, fig.width=3, fig.height=6}
+par(mar=c(1,1,1,1))
+topic.summary=tbl_df(corpus.list.df)%>%
+              filter(type%in%"inaug")%>%
+              select(File, Economy:Legislation)%>%
+              group_by(File)%>%
+              summarise_each(funs(mean))
+topic.summary=as.data.frame(topic.summary)
+rownames(topic.summary)=topic.summary[,1]
+
+# [1] "Economy"         "America"         "Defense"         "Belief"         
+# [5] "Election"        "Patriotism"      "Unity"           "Government"     
+# [9] "Reform"          "Temporal"        "WorkingFamilies" "Freedom"        
+# [13] "Equality"        "Misc"            "Legislation"       
+
+topic.plot=c(1, 13, 9, 11, 8, 3, 7)
+print(topics.hash[topic.plot])
+
+heatmap.2(as.matrix(topic.summary[,topic.plot+1]), 
+          scale = "column", key=F, 
+          col = bluered(100),
+          cexRow = 0.9, cexCol = 0.9, margins = c(8, 8),
+          trace = "none", density.info = "none")
+```
+
+Because economy as a topic is related closely to working families, and there's an inner connection between these two words, we consider they both as economy related topics.
+As the heatmap shown above, the colors in economy and working families do seem darker mostly related to the presidents of the first group.
+
+** Clustering of topics**
+
+```{r, fig.width=3, fig.height=3,warning= FALSE, massage =FALSE}
+presid.summary=tbl_df(corpus.list.df)%>%
+  filter(type=="inaug")%>%
+  select(File, Economy:Legislation)%>%
+  group_by(File)%>%
+  summarise_each(funs(mean))
+
+presid.summary=as.data.frame(presid.summary)
+rownames(presid.summary)=as.character((presid.summary[,1]))
+km.res=kmeans(scale(presid.summary[,-1]), iter.max=200,
+              4)
+fviz_cluster(km.res, 
+             stand=T, repel= TRUE,
+             data = presid.summary[,-1],
+             show.clust.cent=FALSE)
+```
+
+Using cluster analysis and dividing presidents into four groups, most ones in the first group stay in the same cluster (green), but this cluster also contains many presidents of the other group. Donald Trump stands out from others. It is interesting, but we can't conclude there's a clear difference between the topics of the two groups.
+
+# Step 3: Sentiment Analysis
+
+For each extracted sentence, we apply sentiment analysis using [NRC sentiment lexion](http://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm). "The NRC Emotion Lexicon is a list of English words and their associations with eight basic emotions (anger, fear, anticipation, trust, surprise, sadness, joy, and disgust) and two sentiments (negative and positive). The annotations were manually done by crowdsourcing."
+
+```{r, fig.width=2, fig.height=2}
+par(mar=c(4, 6, 2, 1))
+emo.means=colMeans(select(sentence.list%>%filter(type=="inaug", File%in%sel.other), anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(emo.means[order(emo.means)], las=2, col=col.use[order(emo.means)], horiz=T, main="The first group")
+
+par(mar=c(4, 6, 2, 1))
+emo.means=colMeans(select(sentence.list%>%filter(type=="inaug", File%in%sel.comparison), anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(emo.means[order(emo.means)], las=2, col=col.use[order(emo.means)], horiz=T, main="The other group")
+```
+
+As shown above, the first group shows more joy and less fear than the other group. 
+
+**Clustering of sentiment**
+
+```{r, fig.height=3.3, fig.width=3.7, massage = FALSE, warning=FALSE}
+presid.summary=tbl_df(sentence.list)%>%
+  filter(type=="inaug")%>%
+  #group_by(paste0(type, File))%>%
+  group_by(File)%>%
+  summarise(
+    anger=mean(anger),
+    anticipation=mean(anticipation),
+    disgust=mean(disgust),
+    fear=mean(fear),
+    joy=mean(joy),
+    sadness=mean(sadness),
+    surprise=mean(surprise),
+    trust=mean(trust)
+    #negative=mean(negative),
+    #positive=mean(positive)
+  )
+
+presid.summary=as.data.frame(presid.summary)
+rownames(presid.summary)=as.character((presid.summary[,1]))
+km.res=kmeans(presid.summary[,-1], iter.max=200,
+              2)
+fviz_cluster(km.res, 
+             stand=F, repel= TRUE,
+             data = presid.summary[,-1], xlab="", xaxt="n",
+             show.clust.cent=FALSE)
+```
+
+```{r, fig.height=3.3, fig.width=3.7, massage = FALSE, warning=FALSE}
+presid.summary=as.data.frame(presid.summary)
+rownames(presid.summary)=as.character((presid.summary[,1]))
+km.res=kmeans(presid.summary[,-1], iter.max=200,
+              3)
+fviz_cluster(km.res, 
+             stand=F, repel= TRUE,
+             data = presid.summary[,-1], xlab="", xaxt="n",
+             show.clust.cent=FALSE)
+
+```
+
+Using cluster analysis and dividing presidents into two and three clusters, there's not obvious difference between the two goups I want to analyze, as the first group is evenly distributed.
+
+
+#Summary of analyzing the presidents' inaugural speeches
+
+1.According to the Word Cloud analysis, during economic recession days, presidents used more economy related words. It is no wonder that in such hard time, the elected presidents would show their care about economy to comfort their people.    
+
+2.By using LDA model to get 7 topics from presidents' inaugural, not all presidents emphasized economic topics during recessions. Although most of them talked more economic topics than the presidents who did not take office during recessions, the clustering analysis shows there's not obvious differences between these two groups, and only Donald Trump chose really different topic distribution from others. Perhaps besides the economy, many other things matter.  
+
+3.As for sentiment analysis, presidents' inaugural speeches sounded more joyful when the economic background of United States were not optimistic. This is reasonable, as the presidents were supposed to comfort people and gave them confidence about future.
